@@ -18,7 +18,12 @@
 #include "gui/menu.h"
 #include "initc.h"
 #include "input.h"
-#include "macros.h"
+#ifndef lengthof
+#define lengthof(x) (sizeof(x) / sizeof *(x))
+#endif
+#ifndef endof
+#define endof(x) ((x) + lengthof(x))
+#endif
 #include "ui.h"
 #include "vcache.h"
 #include "video/makevid.h"
@@ -66,9 +71,9 @@ static void UpdateVolume(void)
     u4 const vol = MusicRelVol * 128 * 0xA3D70A3DULL >> 38;
     MusicVol = vol < 127 ? vol : 127;
 
-    asm volatile("call %P0" ::"X"(WDSPReg0C), "a"(DSPMem[0x0C])
+    __asm__ volatile("call %P0" ::"X"(WDSPReg0C), "a"(DSPMem[0x0C])
         : "cc", "memory");
-    asm volatile("call %P0" ::"X"(WDSPReg1C), "a"(DSPMem[0x1C])
+    __asm__ volatile("call %P0" ::"X"(WDSPReg1C), "a"(DSPMem[0x1C])
         : "cc", "memory");
 
     static char vollv[] = "VOLUME LEVEL :    ";

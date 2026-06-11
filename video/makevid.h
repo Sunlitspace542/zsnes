@@ -1,7 +1,6 @@
 #ifndef MAKEVID_H
 #define MAKEVID_H
 
-#include "../macros.h"
 #include "../types.h"
 
 typedef struct SpriteInfo {
@@ -10,7 +9,7 @@ typedef struct SpriteInfo {
     u1 pal;
     u1 status;
 } SpriteInfo;
-STATIC_ASSERT(sizeof(SpriteInfo) == 8);
+_Static_assert(sizeof(SpriteInfo) == 8, "SpriteInfo size mismatch");
 
 extern void dualstartprocess();
 extern void makedualwinsp();

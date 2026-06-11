@@ -51,9 +51,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include "debugger/load.h"
 #endif
 
-#include <X11/Xlib.h>
-
-void zexit_error();
+_Noreturn void zexit_error(void);
 
 typedef enum {
     FALSE = 0,
@@ -78,7 +76,6 @@ static uint32_t FullScreen = 0;
 static vidstate_t sdl_state = vid_null;
 static int UseOpenGL = 0;
 static const int BitDepth = 16;
-static bool ScreenSaverSuspended = false;
 static uint32_t FirstVid = 1;
 #ifdef __OPENGL__
 SDL_GLContext gl_context = NULL;
@@ -89,13 +86,25 @@ extern uint32_t* RGBtoYUVPtr;
 
 /* JOYSTICK AND KEYBOARD INPUT */
 static SDL_Joystick* JoystickInput[5];
+static SDL_JoystickID JoystickID[5];
 static unsigned int AxisOffset[5] = { 256 + 128 + 64 }; // per joystick offsets in
 static unsigned int ButtonOffset[5] = { 448 }; // pressed. We have 128 + 64
 static unsigned int HatOffset[5] = { 448 }; // bytes for all joysticks. We
-static unsigned int BallOffset[5] = { 448 }; // can control all 5 players.
+// joystick balls are gone in SDL3
 static int shiftptr = 0;
 static int offset;
 uint32_t numlockptr;
+
+static int joystick_index_from_id(SDL_JoystickID id)
+{
+    int i;
+    for (i = 0; i < 5; i++) {
+        if (JoystickInput[i] && JoystickID[i] == id) {
+            return i;
+        }
+    }
+    return -1;
+}
 
 /* MOUSE INPUT */
 static float MouseMinX = 0;
@@ -128,7 +137,7 @@ static float update_ticks_pc;
 static float update_ticks_pc2;
 
 // Used for semaphore code
-static SDL_sem* sem_frames = NULL;
+static SDL_Semaphore* sem_frames = NULL;
 static struct timeval sem_start;
 
 void Game60hzcall();
@@ -191,7 +200,6 @@ int Main_Proc()
 
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
-#ifdef __SDL3__
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
             IsActivated = 1;
             break;
@@ -244,126 +252,44 @@ int Main_Proc()
             }
             break;
 #endif
-#else
-        case SDL_WINDOWEVENT:
-            if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
-                IsActivated = 1;
-            else if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
-                IsActivated = 0;
-#ifdef __OPENGL__
-            else if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
-                if (GUIRESIZE[cvidmode]) {
-                    WindowWidth = SurfaceX = event.window.data1;
-                    WindowHeight = SurfaceY = event.window.data2;
-                    SetHQx(SurfaceX, SurfaceY);
-                    SetHiresOpt(SurfaceX, SurfaceY);
-                    adjustMouseXScale();
-                    adjustMouseYScale();
-                    glViewport(0, 0, WindowWidth, WindowHeight);
-                    glMatrixMode(GL_PROJECTION);
-                    glLoadIdentity();
-
-                    if (cvidmode == 20) {
-                        if (224 * WindowWidth > 256 * WindowHeight && WindowHeight) {
-                            glOrtho(-((float)224 * WindowWidth) / ((float)256 * WindowHeight),
-                                ((float)224 * WindowWidth) / ((float)256 * WindowHeight), -1, 1, -1, 1);
-                        } else if (224 * WindowWidth < 256 * WindowHeight && WindowWidth) {
-                            glOrtho(-1, 1, -((float)256 * WindowHeight) / ((float)224 * WindowWidth),
-                                ((float)256 * WindowHeight) / ((float)224 * WindowWidth), -1, 1);
-                        } else {
-                            glOrtho(-1, 1, -1, 1, -1, 1);
-                        }
-                    }
-
-                    if (Keep4_3Ratio && ((cvidmode == 21) || (cvidmode == 22))) {
-                        if (3 * WindowWidth > 4 * WindowHeight && WindowHeight) {
-                            glOrtho(-((float)3 * WindowWidth) / ((float)4 * WindowHeight),
-                                ((float)3 * WindowWidth) / ((float)4 * WindowHeight), -1, 1, -1, 1);
-                        } else if (3 * WindowWidth < 4 * WindowHeight && WindowWidth) {
-                            glOrtho(-1, 1, -((float)4 * WindowHeight) / ((float)3 * WindowWidth),
-                                ((float)4 * WindowHeight) / ((float)3 * WindowWidth), -1, 1);
-                        } else {
-                            glOrtho(-1, 1, -1, 1, -1, 1);
-                        }
-                    }
-
-                    glMatrixMode(GL_MODELVIEW);
-                    glLoadIdentity();
-                    glDisable(GL_DEPTH_TEST);
-                    glFlush();
-                    gl_clearwin();
-                    Clear2xSaIBuffer();
-                }
-            }
-#endif
-            break;
-#endif
-        case SDL_KEYDOWN:
-#ifdef __SDL3__
-            if ((event.key.key == SDLK_RETURN) && (event.key.mod & KMOD_ALT) && !event.key.repeat) {
-#else
-            if ((event.key.keysym.sym == SDLK_RETURN) && (event.key.keysym.mod & KMOD_ALT) && !event.key.repeat) {
-#endif
+        case SDL_EVENT_KEY_DOWN:
+            if ((event.key.key == SDLK_RETURN) && (event.key.mod & SDL_KMOD_ALT) && !event.key.repeat) {
                 SwitchFullScreen();
                 break;
             }
-#ifdef __SDL3__
             if (event.key.key == SDLK_LSHIFT || event.key.key == SDLK_RSHIFT) {
-#else
-            if (event.key.keysym.sym == SDLK_LSHIFT || event.key.keysym.sym == SDLK_RSHIFT) {
-#endif
                 shiftptr = 1;
             }
-#ifdef __SDL3__
-            if (event.key.mod & KMOD_NUM) {
-#else
-            if (event.key.keysym.mod & KMOD_NUM) {
-#endif
+            if (event.key.mod & SDL_KMOD_NUM) {
                 numlockptr = 1;
             } else {
                 numlockptr = 0;
             }
 
-#ifdef __SDL3__
             key = sdl_keysym_to_pc_scancode(event.key.key);
-#else
-            key = sdl_keysym_to_pc_scancode(event.key.keysym.sym);
-#endif
             if (key < 448) {
                 pressed[key] = 1;
-#ifdef __SDL3__
                 ProcessKeyBuf(event.key.key);
-#else
-                ProcessKeyBuf(event.key.keysym.sym);
-#endif
             }
             break;
 
-        case SDL_KEYUP:
-#ifdef __SDL3__
+        case SDL_EVENT_KEY_UP:
             if (event.key.key == SDLK_LSHIFT || event.key.key == SDLK_RSHIFT) {
-#else
-            if (event.key.keysym.sym == SDLK_LSHIFT || event.key.keysym.sym == SDLK_RSHIFT) {
-#endif
                 shiftptr = 0;
             }
-#ifdef __SDL3__
             key = sdl_keysym_to_pc_scancode(event.key.key);
-#else
-            key = sdl_keysym_to_pc_scancode(event.key.keysym.sym);
-#endif
             if (key < 448) {
                 pressed[key] = 0;
             }
             break;
 
-        case SDL_MOUSEMOTION:
+        case SDL_EVENT_MOUSE_MOTION:
             if (FullScreen) {
-                MouseX += event.motion.xrel;
-                MouseY += event.motion.yrel;
+                MouseX += (int)event.motion.xrel;
+                MouseY += (int)event.motion.yrel;
             } else {
-                MouseX = ((int)((float)event.motion.x) * MouseXScale);
-                MouseY = ((int)((float)event.motion.y) * MouseYScale);
+                MouseX = ((int)event.motion.x * MouseXScale);
+                MouseY = ((int)event.motion.y * MouseYScale);
             }
 
             if (MouseX < MouseMinX) {
@@ -380,14 +306,14 @@ int Main_Proc()
             }
             break;
 
-        case SDL_MOUSEWHEEL:
+        case SDL_EVENT_MOUSE_WHEEL:
             if (event.wheel.y > 0)
                 ProcessKeyBuf(SDLK_UP);
             else if (event.wheel.y < 0)
                 ProcessKeyBuf(SDLK_DOWN);
             break;
 
-        case SDL_MOUSEBUTTONDOWN:
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
             switch (event.button.button) {
             case SDL_BUTTON_RIGHT:
                 MouseButton |= 2;
@@ -401,7 +327,7 @@ int Main_Proc()
             }
             break;
 
-        case SDL_MOUSEBUTTONUP:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
             switch (event.button.button) {
             case SDL_BUTTON_LEFT:
             case SDL_BUTTON_MIDDLE:
@@ -414,9 +340,13 @@ int Main_Proc()
             }
             break;
 
-        case SDL_JOYHATMOTION:
+        case SDL_EVENT_JOYSTICK_HAT_MOTION: {
+            int idx = joystick_index_from_id(event.jhat.which);
+            if (idx < 0) {
+                break;
+            }
             // POV hats act as direction pad
-            offset = HatOffset[event.jhat.which];
+            offset = HatOffset[idx];
             if (offset >= (256 + 128 + 64)) {
                 break;
             }
@@ -477,43 +407,18 @@ int Main_Proc()
                 break;
             }
             break;
+        }
 
-            /*
-           joystick trackball code untested; change the test
-           values if the motion is too sensitive (or not
-           sensitive enough)
-         */
-        case SDL_JOYBALLMOTION:
-            offset = BallOffset[event.jball.which];
-            offset += event.jball.ball;
-            if (offset >= (256 + 128 + 64)) {
+        case SDL_EVENT_JOYSTICK_AXIS_MOTION: {
+            int idx = joystick_index_from_id(event.jaxis.which);
+            if (idx < 0) {
                 break;
             }
-            if (event.jball.xrel < -100) {
-                pressed[offset] = 0;
-                pressed[offset + 1] = 1;
-            }
-            if (event.jball.xrel > 100) {
-                pressed[offset] = 1;
-                pressed[offset + 1] = 0;
-            }
-            if (event.jball.yrel < -100) {
-                pressed[offset + 2] = 0;
-                pressed[offset + 3] = 1;
-            }
-            if (event.jball.yrel > 100) {
-                pressed[offset + 2] = 1;
-                pressed[offset + 3] = 0;
-            }
-            break;
-
-        case SDL_JOYAXISMOTION:
-            offset = AxisOffset[event.jaxis.which];
+            offset = AxisOffset[idx];
             offset += event.jaxis.axis * 2;
             if (offset >= (256 + 128 + 64)) {
                 break;
             }
-            // printf("DEBUG axis offset: %d\n", offset);
             if (event.jaxis.value < -(joy_sensitivity)) {
                 pressed[offset + 1] = 1;
                 pressed[offset + 0] = 0;
@@ -525,27 +430,36 @@ int Main_Proc()
                 pressed[offset + 1] = 0;
             }
             break;
+        }
 
-        case SDL_JOYBUTTONDOWN:
-            offset = ButtonOffset[event.jbutton.which];
+        case SDL_EVENT_JOYSTICK_BUTTON_DOWN: {
+            int idx = joystick_index_from_id(event.jbutton.which);
+            if (idx < 0) {
+                break;
+            }
+            offset = ButtonOffset[idx];
             offset += event.jbutton.button;
-            // printf("DEBUG button offset: %d\n", offset);
             if (offset >= (256 + 128 + 64)) {
                 break;
             }
             pressed[offset] = 1;
             break;
+        }
 
-        case SDL_JOYBUTTONUP:
-            offset = ButtonOffset[event.jbutton.which];
+        case SDL_EVENT_JOYSTICK_BUTTON_UP: {
+            int idx = joystick_index_from_id(event.jbutton.which);
+            if (idx < 0) {
+                break;
+            }
+            offset = ButtonOffset[idx];
             offset += event.jbutton.button;
-            // printf("DEBUG button offset: %d\n", offset);
             if (offset >= (256 + 128 + 64)) {
                 break;
             }
             pressed[offset] = 0;
             break;
-        case SDL_QUIT:
+        }
+        case SDL_EVENT_QUIT:
             zexit();
             break;
         default:
@@ -589,25 +503,25 @@ static unsigned int sdl_keysym_to_pc_scancode(int sym)
         return 0x0e;
     case SDLK_TAB:
         return 0x0f;
-    case SDLK_q:
+    case SDLK_Q:
         return 0x10;
-    case SDLK_w:
+    case SDLK_W:
         return 0x11;
-    case SDLK_e:
+    case SDLK_E:
         return 0x12;
-    case SDLK_r:
+    case SDLK_R:
         return 0x13;
-    case SDLK_t:
+    case SDLK_T:
         return 0x14;
-    case SDLK_y:
+    case SDLK_Y:
         return 0x15;
-    case SDLK_u:
+    case SDLK_U:
         return 0x16;
-    case SDLK_i:
+    case SDLK_I:
         return 0x17;
-    case SDLK_o:
+    case SDLK_O:
         return 0x18;
-    case SDLK_p:
+    case SDLK_P:
         return 0x19;
     case SDLK_LEFTBRACKET:
         return 0x1a;
@@ -617,48 +531,48 @@ static unsigned int sdl_keysym_to_pc_scancode(int sym)
         return 0x1c;
     case SDLK_LCTRL:
         return 0x1d;
-    case SDLK_a:
+    case SDLK_A:
         return 0x1e;
-    case SDLK_s:
+    case SDLK_S:
         return 0x1f;
-    case SDLK_d:
+    case SDLK_D:
         return 0x20;
-    case SDLK_f:
+    case SDLK_F:
         return 0x21;
-    case SDLK_g:
+    case SDLK_G:
         return 0x22;
-    case SDLK_h:
+    case SDLK_H:
         return 0x23;
-    case SDLK_j:
+    case SDLK_J:
         return 0x24;
-    case SDLK_k:
+    case SDLK_K:
         return 0x25;
-    case SDLK_l:
+    case SDLK_L:
         return 0x26;
     case SDLK_SEMICOLON:
         return 0x27;
-    case SDLK_QUOTE:
+    case SDLK_APOSTROPHE:
         return 0x28;
-    case SDLK_BACKQUOTE:
+    case SDLK_GRAVE:
     case SDLK_HASH:
         return 0x29;
     case SDLK_LSHIFT:
         return 0x2a;
     case SDLK_BACKSLASH:
         return 0x2b;
-    case SDLK_z:
+    case SDLK_Z:
         return 0x2c;
-    case SDLK_x:
+    case SDLK_X:
         return 0x2d;
-    case SDLK_c:
+    case SDLK_C:
         return 0x2e;
-    case SDLK_v:
+    case SDLK_V:
         return 0x2f;
-    case SDLK_b:
+    case SDLK_B:
         return 0x30;
-    case SDLK_n:
+    case SDLK_N:
         return 0x31;
-    case SDLK_m:
+    case SDLK_M:
         return 0x32;
     case SDLK_COMMA:
         return 0x33;
@@ -756,6 +670,10 @@ static unsigned int sdl_keysym_to_pc_scancode(int sym)
         return 0x55;
     case SDLK_KP_ENTER:
         return 0x5D;
+    case SDLK_KP_DIVIDE:
+        return 0x56;
+    case SDLK_KP_EQUALS:
+        return 0x64;
     }
     return (0x64 + sym);
 }
@@ -890,7 +808,7 @@ static void ProcessKeyBuf(int scancode)
             vkeyval = '/';
             accept = 1;
             break;
-        case SDLK_QUOTE:
+        case SDLK_APOSTROPHE:
             vkeyval = '`';
             accept = 1;
             break;
@@ -917,7 +835,7 @@ static void ProcessKeyBuf(int scancode)
             vkeyval = ':';
             accept = 1;
             break;
-        case SDLK_QUOTE:
+        case SDLK_APOSTROPHE:
             vkeyval = '"';
             accept = 1;
             break;
@@ -933,7 +851,7 @@ static void ProcessKeyBuf(int scancode)
             vkeyval = '?';
             accept = 1;
             break;
-        case SDLK_BACKQUOTE:
+        case SDLK_GRAVE:
             vkeyval = '~';
             accept = 1;
             break;
@@ -992,6 +910,10 @@ static void ProcessKeyBuf(int scancode)
         vkeyval = '/';
         accept = 1;
         break;
+    case SDLK_KP_EQUALS:
+        vkeyval = '=';
+        accept = 1;
+        break;
     case SDLK_KP_PERIOD:
         vkeyval = '.';
         accept = 1;
@@ -1009,39 +931,40 @@ static void ProcessKeyBuf(int scancode)
 
 BOOL InitJoystickInput()
 {
-    int i, max_num_joysticks;
-    int num_axes, num_buttons, num_hats, num_balls;
+    int i, max_num_joysticks, num_joysticks = 0;
+    int num_axes, num_buttons, num_hats;
     int next_offset = 256;
+    SDL_JoystickID* ids;
 
     for (i = 0; i < 5; i++) {
         JoystickInput[i] = NULL;
+        JoystickID[i] = 0;
     }
 
-    // If it is possible to use SDL_NumJoysticks
-    // before initialising SDL_INIT_JOYSTICK then
-    // this call can be replaced with SDL_InitSubSystem
     SDL_InitSubSystem(SDL_INIT_JOYSTICK);
-    max_num_joysticks = SDL_NumJoysticks();
-    if (!max_num_joysticks) {
+    ids = SDL_GetJoysticks(&num_joysticks);
+    if (!ids || num_joysticks <= 0) {
         printf("No joysticks found.\n");
+        SDL_free(ids);
         SDL_QuitSubSystem(SDL_INIT_JOYSTICK);
         return FALSE;
     }
-    SDL_JoystickEventState(SDL_ENABLE);
+    SDL_SetJoystickEventsEnabled(true);
 
-    if (max_num_joysticks > 5) {
-        max_num_joysticks = 5;
-    }
+    max_num_joysticks = num_joysticks > 5 ? 5 : num_joysticks;
 
     for (i = 0; i < max_num_joysticks; i++) {
-        JoystickInput[i] = SDL_JoystickOpen(i);
-        num_axes = SDL_JoystickNumAxes(JoystickInput[i]);
-        num_buttons = SDL_JoystickNumButtons(JoystickInput[i]);
-        num_hats = SDL_JoystickNumHats(JoystickInput[i]);
-        num_balls = SDL_JoystickNumBalls(JoystickInput[i]);
-        printf("Device %i %s\n", i, SDL_JoystickName(JoystickInput[i]));
-        printf("  %i axis, %i buttons, %i hats, %i balls\n", num_axes, num_buttons, num_hats,
-            num_balls);
+        JoystickInput[i] = SDL_OpenJoystick(ids[i]);
+        if (!JoystickInput[i]) {
+            printf("Could not open joystick %d: %s\n", i, SDL_GetError());
+            continue;
+        }
+        JoystickID[i] = ids[i];
+        num_axes = SDL_GetNumJoystickAxes(JoystickInput[i]);
+        num_buttons = SDL_GetNumJoystickButtons(JoystickInput[i]);
+        num_hats = SDL_GetNumJoystickHats(JoystickInput[i]);
+        printf("Device %i %s\n", i, SDL_GetJoystickName(JoystickInput[i]));
+        printf("  %i axis, %i buttons, %i hats\n", num_axes, num_buttons, num_hats);
 
         if (next_offset >= 448) {
             printf("Warning: Joystick won't work.\n");
@@ -1051,14 +974,14 @@ BOOL InitJoystickInput()
         AxisOffset[i] = next_offset;
         ButtonOffset[i] = AxisOffset[i] + num_axes * 2;
         HatOffset[i] = ButtonOffset[i] + num_buttons;
-        BallOffset[i] = HatOffset[i] + num_hats * 4;
-        next_offset = BallOffset[i] + num_balls * 4;
+        next_offset = HatOffset[i] + num_hats * 4;
 
         if (next_offset > (256 + 128 + 64)) {
-            printf("Warning: Too many buttons, axes, hats and/or Balls!\n");
+            printf("Warning: Too many buttons, axes and/or hats!\n");
             printf("Warning: Joystick won't work fully.\n");
         }
     }
+    SDL_free(ids);
 
     return TRUE;
 }
@@ -1076,8 +999,6 @@ int startgame()
     static bool ranonce = false;
     int status;
 
-    XInitThreads();
-
     if (!ranonce) {
         ranonce = true;
 
@@ -1088,13 +1009,7 @@ int startgame()
     }
 
     if (sdl_state == vid_null) {
-        if (
-#ifdef __SDL3__
-            !SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO)
-#else
-            SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO) < 0
-#endif
-        ) {
+        if (!SDL_Init(SDL_INIT_VIDEO)) {
             fprintf(stderr, "Could not initialize SDL: %s", SDL_GetError());
             return FALSE;
         }
@@ -1331,11 +1246,7 @@ void initwinvideo(void)
                 int vp_w = (int)WindowWidth;
                 int vp_h = (int)WindowHeight;
                 if (FullScreen && sdl_window) {
-#ifdef __SDL3__
                     SDL_GetWindowSizeInPixels(sdl_window, &vp_w, &vp_h);
-#else
-                    SDL_GL_GetDrawableSize(sdl_window, &vp_w, &vp_h);
-#endif
                 }
                 glViewport(0, 0, vp_w, vp_h);
                 glMatrixMode(GL_PROJECTION);
@@ -1479,17 +1390,13 @@ int TryToggleFullScreen(void)
         break;
     }
 
-#ifdef __SDL3__
     SDL_SetWindowFullscreen(sdl_window, FullScreen ? true : false);
-#else
-    SDL_SetWindowFullscreen(sdl_window, FullScreen ? SDL_WINDOW_FULLSCREEN : 0);
-#endif
 
     if (!FullScreen) {
         SDL_SetWindowSize(sdl_window, WindowWidth, WindowHeight);
     }
 
-    SDL_SetWindowGrab(sdl_window, FullScreen ? SDL_TRUE : SDL_FALSE);
+    SDL_SetWindowMouseGrab(sdl_window, FullScreen ? true : false);
 
     adjustMouseXScale();
     adjustMouseYScale();
@@ -1499,11 +1406,7 @@ int TryToggleFullScreen(void)
         int vp_w = (int)WindowWidth;
         int vp_h = (int)WindowHeight;
         if (FullScreen) {
-#ifdef __SDL3__
             SDL_GetWindowSizeInPixels(sdl_window, &vp_w, &vp_h);
-#else
-            SDL_GL_GetDrawableSize(sdl_window, &vp_w, &vp_h);
-#endif
         }
         glViewport(0, 0, vp_w, vp_h);
         glMatrixMode(GL_PROJECTION);
@@ -1559,7 +1462,7 @@ void CheckTimers(void)
 
         while ((end - start) >= update_ticks_pc) {
             Game60hzcall();
-            SDL_SemPost(sem_frames);
+            SDL_SignalSemaphore(sem_frames);
             start += update_ticks_pc;
         }
     }
@@ -1578,7 +1481,7 @@ void sem_sleep(void)
 {
     end = update_ticks_pc - (sem_GetTicks() - start) - .2f;
     if (end > 0.f) {
-        SDL_SemWaitTimeout(sem_frames, (int)end);
+        SDL_WaitSemaphoreTimeout(sem_frames, (Sint32)end);
     }
 }
 
@@ -1589,7 +1492,7 @@ int sem_thread(void* param)
 {
     while (sem_threadrun) {
         if (T60HZEnabled) {
-            SDL_SemPost(sem_frames);
+            SDL_SignalSemaphore(sem_frames);
             usleep(romispal ? 2000 : 1000);
         } else {
             usleep(20000);
@@ -1621,8 +1524,26 @@ static void sem_sleep_die()
     }
 }
 
+void DoRumble(void)
+{
+    extern u2 RumbleData;
+
+    if (RumbleData == 0xFFFF) {
+        RumbleData = 0;
+    }
+
+    if ((RumbleData & 0xFF00) == 0x7200) {
+        u2 RumbleLeft = ((RumbleData & 0x000F) * 4369);
+        u2 RumbleRight = (((RumbleData & 0x00F0) >> 4) * 4369);
+        SDL_RumbleJoystick(JoystickInput[0], RumbleLeft, RumbleRight, 600);
+        RumbleData = 0;
+    }
+}
+
 void UpdateVFrame(void)
 {
+    extern u1 MultiTap;
+
     // Quick fix for GUI CPU usage
     if (GUIOn || GUIOn2 || EMUPause) {
         usleep(6000);
@@ -1630,6 +1551,13 @@ void UpdateVFrame(void)
 
     CheckTimers();
     Main_Proc();
+
+    if (SNESRumble && !MultiTap) {
+        DoRumble();
+    } else {
+        // Stop vibration
+        SDL_RumbleJoystick(JoystickInput[0], 0, 0, 1);
+    }
 
     if (sound_sdl) {
         SoundWrite_sdl();
@@ -1701,7 +1629,7 @@ void UnloadSDL()
     }
 #endif
     if (sdl_state != vid_null && sdl_window) {
-        SDL_SetWindowGrab(sdl_window, SDL_FALSE);
+        SDL_SetWindowMouseGrab(sdl_window, false);
     }
     SDL_Quit();
 }
@@ -1717,9 +1645,10 @@ s4 GetMouseY(void)
 
 s4 GetMouseMoveX(void)
 {
-    //   InputRead();
-    // SDL_GetRelativeMouseState(&MouseMove2X, NULL);
-    SDL_GetRelativeMouseState(&MouseMove2X, &MouseMove2Y);
+    float fx = 0.0f, fy = 0.0f;
+    SDL_GetRelativeMouseState(&fx, &fy);
+    MouseMove2X = (int)fx;
+    MouseMove2Y = (int)fy;
     return (MouseMove2X);
 }
 

@@ -3,6 +3,7 @@
 *.raw
 *.wav
 build/
+.vscode/
 cfg.h
 config.default
 include.txt
@@ -18,3 +19,4 @@ zsnes
 zsnes.exe
 zsnesl.cfg
 zcfgloc.cfg
+unused-report.txt

@@ -50,7 +50,12 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include "init.h"
 #include "initc.h"
 #include "input.h"
-#include "macros.h"
+#ifndef lengthof
+#define lengthof(x) (sizeof(x) / sizeof *(x))
+#endif
+#ifndef endof
+#define endof(x) ((x) + lengthof(x))
+#endif
 #include "ui.h"
 #include "video/procvid.h"
 #include "zpath.h"
@@ -984,13 +989,6 @@ void load_file_fs(char* path)
 {
     uint8_t* ROM = romdata;
 
-    if (isextension(path, "jma")) {
-#ifdef NO_JMA
-        puts("This binary was built without JMA support.");
-#else
-        load_jma_file_dir(ZRomPath, path);
-#endif
-    }
     if (isextension(path, "zip")) {
         loadZipFile(path);
     }
@@ -1121,15 +1119,7 @@ void loadROM()
     EMUPause = false;
     curromspace = 0;
 
-    if (isextension(ZCartName, "jma")) {
-#ifdef NO_JMA
-        puts("This binary was built without JMA support.");
-        return;
-#else
-        isCompressed = true;
-        load_jma_file_dir(ZRomPath, ZCartName);
-#endif
-    } else if (isextension(ZCartName, "zip")) {
+    if (isextension(ZCartName, "zip")) {
         isCompressed = true;
         isZip = true;
         loadZipFile(ZCartName);
@@ -2094,7 +2084,6 @@ void map_hirom()
 void map_ehirom()
 {
     uint8_t* ROM = romdata;
-    uint_fast8_t x;
     // set addresses 8000-FFFF
     // set banks 00-3F (40h x 32KB ROM banks @ 10000h)
     map_set(snesmmap, ROM + 0x400000, 0x40, 0x10000); // FuSoYa: extended from 48Mbits to 64Mbits
@@ -2669,7 +2658,7 @@ void init65816(void)
 
 static bool zexit_called = false;
 
-void zexit(void)
+_Noreturn void zexit(void)
 {
     if (!zexit_called) {
         zexit_called = true;
@@ -2679,9 +2668,11 @@ void zexit(void)
             exit(0);
         }
     }
+    /* Re-entrant exit (e.g. from an atexit handler); bypass it. */
+    _Exit(0);
 }
 
-void zexit_error()
+_Noreturn void zexit_error(void)
 {
     if (!zexit_called) {
         zexit_called = true;
@@ -2691,4 +2682,5 @@ void zexit_error()
             exit(1);
         }
     }
+    _Exit(1);
 }

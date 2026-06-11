@@ -17,7 +17,9 @@ u4 CurKeyReadPos = 0;
 u4 KeyBuffer[16] = { 0 };
 u4 converta = 0;
 #include "../link.h"
-#include "../macros.h"
+#ifndef lengthof
+#define lengthof(x) (sizeof(x) / sizeof *(x))
+#endif
 #include "../ui.h"
 #include "../vcache.h"
 #include "../video/c_2xsaiw.h"
@@ -537,7 +539,7 @@ char const ScanCodeListing[] = {
     "KP."
     "RCT"
     "RAL"
-    "OEM"
+    "KP/"
     "F11" // 0x050
     "F12"
     "HOM"
@@ -551,7 +553,7 @@ char const ScanCodeListing[] = {
     "PGD"
     "INS"
     "DEL"
-    "64H"
+    "KP=" // 0x064
     "65H"
     "66H"
     "67H" // 0x060

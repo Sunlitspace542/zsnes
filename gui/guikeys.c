@@ -19,6 +19,12 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+#ifndef lengthof
+#define lengthof(x) (sizeof(x) / sizeof *(x))
+#endif
+#ifndef endof
+#define endof(x) ((x) + lengthof(x))
+#endif
 #include <stdarg.h>
 #include <stdbool.h>
 #include <string.h>
@@ -338,6 +344,7 @@ static void GUIInputKeys(char dh)
         GUIFreshInputSelect = 1;
     }
     GUIKeyCheckbox(&GameSpecificInput, 'G', dh);
+    GUIKeyCheckbox(&SNESRumble, 'R', dh);
     GUIKeyCheckbox(&AllowUDLR, 'A', dh);
     GUIKeyCheckbox(&Turbo30hz, 'T', dh);
     if (dh == 'U') {

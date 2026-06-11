@@ -14,7 +14,9 @@
 #include "../input.h"
 #include "../intrf.h"
 #include "../link.h"
-#include "../macros.h"
+#ifndef lengthof
+#define lengthof(x) (sizeof(x) / sizeof *(x))
+#endif
 #include "../ui.h"
 #include "../vcache.h"
 #include "../video/c_2xsaiw.h"
@@ -35,9 +37,6 @@ void StartUp(void) { }
 
 void SystemInit(void)
 {
-#ifndef __RELEASE__
-    DisplayWIPDisclaimer();
-#endif
     // Be sure to set SBHDMA to a value other than 0 if 16bit sound exists
     SBHDMA = 1;
 }

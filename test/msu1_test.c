@@ -15,6 +15,8 @@
 
 #include "zstest.h"
 
+#define MSU_STATUS_DATA_BUSY 0x80
+
 /* --- Mock globals -------------------------------------------------------- */
 
 uint8_t MSU_StatusRead;
@@ -35,7 +37,6 @@ void MSU1HandleControlBits(void) { handle_status_calls++; }
 
 #define RESET_MOCKS()                            \
     do {                                         \
-        get_status_calls = 0;                    \
         handle_track_calls = 0;                  \
         handle_status_calls = 0;                 \
         MSU_StatusRead = 0;                      \
@@ -95,22 +96,28 @@ static void test_msudataread(void)
     mock_data[0] = 0x11;
     mock_data[1] = 0x22;
     mock_data[2] = 0x33;
-    MSU_Data_SeekPort = 0;
+    MSU_Data_Addr = 0;
 
     ZT_CHECK(msudataread() == 0x11);
-    ZT_CHECK(MSU_Data_SeekPort == 1);
+    ZT_CHECK(MSU_Data_Addr == 1);
 
     ZT_CHECK(msudataread() == 0x22);
-    ZT_CHECK(MSU_Data_SeekPort == 2);
+    ZT_CHECK(MSU_Data_Addr == 2);
 
     ZT_CHECK(msudataread() == 0x33);
-    ZT_CHECK(MSU_Data_SeekPort == 3);
+    ZT_CHECK(MSU_Data_Addr == 3);
 
     /* seek at arbitrary offset */
     mock_data[100] = 0xAB;
-    MSU_Data_SeekPort = 100;
+    MSU_Data_Addr = 100;
     ZT_CHECK(msudataread() == 0xAB);
-    ZT_CHECK(MSU_Data_SeekPort == 101);
+    ZT_CHECK(MSU_Data_Addr == 101);
+
+    /* DATA_BUSY bit set: read returns current byte but does not advance */
+    MSU_StatusRead = MSU_STATUS_DATA_BUSY;
+    MSU_Data_Addr = 0;
+    ZT_CHECK(msudataread() == 0x11);
+    ZT_CHECK(MSU_Data_Addr == 0);
 }
 
 static void test_msu_id_chars(void)
@@ -129,7 +136,7 @@ static void test_msudataseek_bytes(void)
 {
     ZT_SECTION("msudataseek0..3: write individual bytes of MSU_Data_SeekPort");
 
-    /* byte 0 — least significant byte */
+    /* byte 0, least significant byte */
     MSU_Data_SeekPort = 0x12345678u;
     msudataseek0(0xAB);
     ZT_CHECK(MSU_Data_SeekPort == 0x123456ABu);
@@ -144,7 +151,7 @@ static void test_msudataseek_bytes(void)
     msudataseek2(0xEF);
     ZT_CHECK(MSU_Data_SeekPort == 0x12EF5678u);
 
-    /* byte 3 — most significant byte */
+    /* byte 3, most significant byte */
     MSU_Data_SeekPort = 0x12345678u;
     msudataseek3(0x90);
     ZT_CHECK(MSU_Data_SeekPort == 0x90345678u);

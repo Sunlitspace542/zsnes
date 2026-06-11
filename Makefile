@@ -1,4 +1,4 @@
-.PHONY: clean distclean fmt info test
+.PHONY: clean distclean fmt info test win32 unused
 
 # Supported ARCH values:
 #   LINUX, FREEBSD, OPENBSD, NETBSD, DARWIN, WIN
@@ -37,10 +37,7 @@ ifeq ($(filter -j% --jobs%,$(MAKEFLAGS)),)
 endif
 
 CC ?= gcc
-CXX ?= g++
-CXX_HOST ?= $(CXX)
 CC_TARGET  ?= $(CC)
-CXX_TARGET ?= $(CXX)
 WINDRES ?= windres
 CC_TARGET_TRIPLE := $(shell $(CC_TARGET) -dumpmachine 2>/dev/null)
 WIN_PORT_AVAILABLE := $(if $(wildcard win/c_winintrf.c),yes,)
@@ -86,27 +83,33 @@ endif
 IS_FEDORA       := $(if $(wildcard /etc/fedora-release),yes)
 IS_DEBIAN_BASED := $(if $(wildcard /etc/debian_version),yes)
 
-COMMON_FLAGS = $(ARCH_CFLAGS) -pthread -no-pie -O1 -fno-inline -fno-pic -mtune=generic -D_FORTIFY_SOURCE=2 -ffunction-sections -fdata-sections -Wfatal-errors -w
+# `unused` target overrides this to re-enable -Wunused* (GCC's -w cannot be
+# undone by appending -W flags later).
+WARN_FLAGS ?= -w
+COMMON_FLAGS = $(ARCH_CFLAGS) -pthread -no-pie -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L -O3 -fno-gcse -fno-inline -fno-pic -D_FORTIFY_SOURCE=2 -ffunction-sections -fdata-sections -Wfatal-errors $(WARN_FLAGS)
 
 # TODO: FreeBSD has a patch for being able to build without -fcommon
-CFLAGS += $(COMMON_FLAGS) -std=gnu99 -fcommon
-CXXFLAGS += $(COMMON_FLAGS) -std=gnu++14
+CFLAGS += $(COMMON_FLAGS) -fcommon
 ifneq ($(ARCH),DARWIN)
 CFLAGS += -mno-sse -mno-sse2
-CXXFLAGS += -mno-sse -mno-sse2
 endif
-LDFLAGS += -Wl,--as-needed -no-pie -Wl,--gc-sections -lz
-# -O1 is mandatory
+LDFLAGS += -Wl,--as-needed -no-pie -Wl,--gc-sections -lz -lm
+# -O1 is mandatory for Assembly, for now
 ASMFLAGS += -O1 -w-orphan-labels -w-number-deprecated-hex -w-pp-macro-params-legacy
 
-WITH_AO       :=
 #WITH_DEBUGGER := yes
-WITH_JMA      := yes
 WITH_OPENGL   := yes
 WITH_PNG      := yes
 WITH_SDL      := $(if $(filter $(ARCH),$(UNIXSDL_ARCHES)),yes,)
 WITH_PIPEWIRE :=
 WITH_AO       :=
+
+# Add more pkg-config paths, with Fedora and Debian/Ubuntu in mind
+ifneq ($(filter $(ARCH),LINUX),)
+ifneq ($(filter -m32,$(ARCH_CFLAGS)),)
+export PKG_CONFIG_PATH := /usr/lib/pkgconfig:/usr/lib/i386-linux-gnu/pkgconfig:/usr/share/pkgconfig:$(PKG_CONFIG_PATH)
+endif
+endif
 
 # Check that pkg-config deps are also linkable with the current target flags (for example, -m32).
 define detect_pkg_for_target
@@ -121,7 +124,6 @@ endef
 PIPEWIRE_AVAILABLE :=
 AO_AVAILABLE :=
 SDL3_AVAILABLE :=
-SDL2_AVAILABLE :=
 SDL_BACKEND_AVAILABLE :=
 
 ifneq ($(filter $(ARCH),$(UNIXSDL_ARCHES)),)
@@ -132,8 +134,7 @@ ifneq ($(filter $(ARCH),LINUX FREEBSD OPENBSD NETBSD DARWIN WIN),)
 AO_AVAILABLE := $(call detect_pkg_for_target,ao)
 endif
 SDL3_AVAILABLE := $(call detect_pkg_for_target,sdl3)
-SDL2_AVAILABLE := $(call detect_pkg_for_target,sdl2)
-SDL_BACKEND_AVAILABLE := $(if $(or $(SDL3_AVAILABLE),$(SDL2_AVAILABLE),$(strip $(SDL_CONFIG)),$(strip $(CFLAGS_SDL)),$(strip $(LDFLAGS_SDL))),yes)
+SDL_BACKEND_AVAILABLE := $(if $(or $(SDL3_AVAILABLE),$(strip $(SDL_CONFIG)),$(strip $(CFLAGS_SDL)),$(strip $(LDFLAGS_SDL))),yes)
 endif
 
 SKIP_AUDIO_BACKEND_CHECK := $(if $(filter clean distclean,$(MAKECMDGOALS)),yes)
@@ -159,23 +160,19 @@ ifeq ($(SKIP_AUDIO_BACKEND_CHECK),)
         $(info )
         $(info ERROR: No 32-bit SDL library found. This is a 32-bit build (-m32).)
         ifeq ($(IS_FEDORA),yes)
-        $(info Install the 32-bit SDL package (note the .i686 suffix — NOT the x86_64 package):)
+        $(info Install the 32-bit SDL3 package (note the .i686 suffix, NOT the x86_64 package):)
         $(info   sudo dnf install SDL3-devel.i686)
-        $(info or:)
-        $(info   sudo dnf install SDL2-devel.i686)
         else ifeq ($(IS_DEBIAN_BASED),yes)
-        $(info Enable 32-bit support and install the 32-bit SDL package (note the :i386 suffix):)
+        $(info Enable 32-bit support and install the 32-bit SDL3 package (note the :i386 suffix):)
         $(info   sudo dpkg --add-architecture i386 && sudo apt update)
         $(info   sudo apt install libsdl3-dev:i386)
-        $(info or:)
-        $(info   sudo apt install libsdl2-dev:i386)
         else
-        $(info Install the 32-bit SDL3 or SDL2 development package for your distribution.)
+        $(info Install the 32-bit SDL3 development package for your distribution.)
         endif
         $(info )
         $(error Missing 32-bit SDL library. See instructions above.)
       else
-        $(error No SDL backend available. Install SDL3 or SDL2 for ARCH=$(ARCH))
+        $(error No SDL backend available. Install SDL3 for ARCH=$(ARCH))
       endif
     endif
   endif
@@ -185,25 +182,23 @@ ifeq ($(SKIP_AUDIO_BACKEND_CHECK),)
       $(info )
       $(info ERROR: No 32-bit audio backend found. This is a 32-bit build (-m32).)
       ifeq ($(IS_FEDORA),yes)
-      $(info Install one of the following 32-bit packages (note the .i686 suffix — NOT the x86_64 packages):)
+      $(info Install one of the following 32-bit packages (note the .i686 suffix, NOT the x86_64 packages):)
       $(info   sudo dnf install pipewire-devel.i686)
       $(info   sudo dnf install libao-devel.i686)
       $(info   sudo dnf install SDL3-devel.i686)
-      $(info   sudo dnf install SDL2-devel.i686)
       else ifeq ($(IS_DEBIAN_BASED),yes)
       $(info Enable 32-bit support, then install one of the following 32-bit packages (note the :i386 suffix):)
       $(info   sudo dpkg --add-architecture i386 && sudo apt update)
       $(info   sudo apt install libpipewire-0.3-dev:i386)
       $(info   sudo apt install libao-dev:i386)
       $(info   sudo apt install libsdl3-dev:i386)
-      $(info   sudo apt install libsdl2-dev:i386)
       else
-      $(info Install the 32-bit development package for one of: PipeWire, libao, SDL3, or SDL2.)
+      $(info Install the 32-bit development package for one of: PipeWire, libao, or SDL3.)
       endif
       $(info )
       $(error Missing 32-bit audio library. See instructions above.)
     else
-      $(error No audio backend available. Install one of: PipeWire (libpipewire-0.3), libao, SDL3 or SDL2)
+      $(error No audio backend available. Install one of: PipeWire (libpipewire-0.3), libao, or SDL3)
     endif
   endif
   endif
@@ -222,19 +217,16 @@ PREFIX ?= /usr
 
 ifneq ($(filter $(ARCH),LINUX FREEBSD OPENBSD NETBSD),)
   CFLAGS += -rdynamic
-  CXXFLAGS += -rdynamic
-  LDFLAGS += -ldl -lX11
+  LDFLAGS += -ldl
 endif
 ifeq ($(ARCH),DARWIN)
 ifneq ($(HOST_OS),DARWIN)
   CFLAGS += -rdynamic
-  CXXFLAGS += -rdynamic
-  LDFLAGS += -ldl -lX11
+  LDFLAGS += -ldl
 endif
 endif
 ifeq ($(ARCH),LINUX)
   CFLAGS += -L/usr/lib32
-  CXXFLAGS += -L/usr/lib32
   LDFLAGS += -L/usr/lib32
 endif
 
@@ -243,9 +235,6 @@ ifeq ($(WITH_SDL),yes)
     ifeq ($(SDL3_AVAILABLE),yes)
       SDL_CONFIG := pkg-config sdl3
       SDL_PKG := sdl3
-    else ifeq ($(SDL2_AVAILABLE),yes)
-      SDL_CONFIG := pkg-config sdl2
-      SDL_PKG := sdl2
     endif
   else
     SDL_PKG := $(lastword $(SDL_CONFIG))
@@ -289,8 +278,7 @@ ifeq ($(WITH_AO),yes)
   endif
   CFLAGS += $(CFLAGS_AO)
   LDFLAGS += $(LDFLAGS_AO)
-else
-  CFGDEFS += -DNO_AO
+  CFGDEFS += -D__LIBAO__
 endif
 
 ifeq ($(WITH_PIPEWIRE),yes)
@@ -315,13 +303,7 @@ endif
 
 ifeq ($(ARCH),LINUX)
 ifeq ($(wildcard /usr/lib/i386-linux-gnu/.),)
-  CFLAGS += -I/usr/include/x86_64-linux-gnu -I /usr/include/X11
-  CXXFLAGS += -I/usr/include/x86_64-linux-gnu -I /usr/include/X11
-  ifeq ($(SDL_PKG),sdl3)
-    LDFLAGS += -L/usr/lib/i386-linux-gnu -lSDL3 -lpng16 -lX11
-  else
-    LDFLAGS += -L/usr/lib/i386-linux-gnu -lSDL2 -lpng16 -lX11
-  endif
+  CFLAGS += -I/usr/include/x86_64-linux-gnu
 endif
 endif
 
@@ -459,20 +441,6 @@ endif
 
 DEBUGFLAGS :=
 
-ifdef WITH_JMA
-SRCS += jma/7zlzma.cpp
-SRCS += jma/crc32.cpp
-SRCS += jma/iiostrm.cpp
-SRCS += jma/inbyte.cpp
-SRCS += jma/jma.cpp
-SRCS += jma/lzma.cpp
-SRCS += jma/lzmadec.cpp
-SRCS += jma/winout.cpp
-SRCS += jma/zsnesjma.cpp
-else
-CFGDEFS += -DNO_JMA
-endif
-
 ifdef WITH_OPENGL
 CFGDEFS += -D__OPENGL__
 endif
@@ -500,9 +468,6 @@ CFGDEFS += -D__UNIXSDL__
 ifeq ($(ARCH),LINUX)
 CFGDEFS += -D__ZSNES_PLATFORM_LINUX__
 endif
-ifneq ($(filter $(ARCH),FREEBSD OPENBSD NETBSD),)
-CFGDEFS += -D__BSDSDL__
-endif
 ifeq ($(ARCH),FREEBSD)
 CFGDEFS += -D__ZSNES_PLATFORM_FREEBSD__
 endif
@@ -511,9 +476,6 @@ CFGDEFS += -D__ZSNES_PLATFORM_OPENBSD__
 endif
 ifeq ($(ARCH),NETBSD)
 CFGDEFS += -D__ZSNES_PLATFORM_NETBSD__
-endif
-ifeq ($(SDL_PKG),sdl3)
-CFGDEFS += -D__SDL3__ -DSDL_ENABLE_OLD_NAMES
 endif
 
 
@@ -524,7 +486,7 @@ SRCS += mmlib/osx.c
 
 ASMFLAGS += -fmacho -DMACHO
 
-CFGDEFS += -D__MACOSX__
+CFGDEFS += -D__ZSNES_PLATFORM_DARWIN__
 
 CFLAGS += -fno-pic
 
@@ -556,13 +518,13 @@ ifeq ($(ARCH),WIN)
 SRCS += mmlib/windows.c
 SRCS += win/zsnes.rc
 SRCS += win/c_winintrf.c
-SRCS += win/dx_ddraw.cpp
+SRCS += win/dx_ddraw.c
 SRCS += win/lib.c
 SRCS += win/safelib.c
 SRCS += win/winintrf.asm
-SRCS += win/winlink.cpp
+SRCS += win/winlink.c
 
-LDFLAGS += -ldxguid -ldinput -lgdi32 -lole32 -lwinmm
+LDFLAGS += -ldxguid -ldinput -lxinput -lgdi32 -lole32 -lwinmm
 
 ifdef WITH_OPENGL
 SRCS += win/gl_draw.c
@@ -570,6 +532,8 @@ LDFLAGS += -lopengl32
 endif
 
 LDFLAGS += --static
+# clock_gettime lives in winpthread; put it after objects so --as-needed keeps it.
+LDFLAGS += -lwinpthread
 
 PSRS += win/confloc.psr
 
@@ -581,12 +545,14 @@ endif
 
 ASMFLAGS += $(CFGDEFS)
 CFLAGS += $(CFGDEFS)
-CXXFLAGS += $(CFGDEFS)
+# Append hooks for layered flags.
+CFLAGS   += $(EXTRA_CFLAGS)
+ASMFLAGS += $(EXTRA_ASMFLAGS)
+LDFLAGS  += $(EXTRA_LDFLAGS)
 DEPFLAGS_C = -MMD -MP -MF $(@:.o=.d) -MT $@
-DEPFLAGS_CXX = -MMD -MP -MF $(@:.o=.d) -MT $@
 
 HDRS := $(PSRS:.psr=.h)
-OBJS := $(filter %.o, $(SRCS:.asm=.o) $(SRCS:.c=.o) $(SRCS:.cpp=.o) $(SRCS:.rc=.o) $(PSRS:.psr=.o))
+OBJS := $(filter %.o, $(SRCS:.asm=.o) $(SRCS:.c=.o) $(SRCS:.rc=.o) $(PSRS:.psr=.o))
 DEPS := $(OBJS:.o=.d)
 
 .SUFFIXES:
@@ -594,6 +560,13 @@ DEPS := $(OBJS:.o=.d)
 #Q ?= @
 
 all: $(BINARY)
+
+# Cross-build the Windows executable from Linux using the mingw32 toolchain.
+MINGW32_PREFIX ?= i686-w64-mingw32
+win32:
+	@command -v $(MINGW32_PREFIX)-gcc >/dev/null 2>&1 || { \
+	  echo "error: $(MINGW32_PREFIX)-gcc not found; install the mingw32 toolchain" >&2; exit 1; }
+	$(MAKE) ARCH=WIN CC=$(MINGW32_PREFIX)-gcc CC_TARGET=$(MINGW32_PREFIX)-gcc WINDRES=$(MINGW32_PREFIX)-windres
 
 debug: DEBUGFLAGS += -g
 debug: $(BINARY)
@@ -603,22 +576,18 @@ debug: $(BINARY)
 
 $(BINARY): $(OBJS)
 	@echo '===> LD $@'
-	$(Q)$(CXX_TARGET) $(CFLAGS) $(OBJS) $(LDFLAGS) $(DEBUGFLAGS) -o $@
+	$(Q)$(CC_TARGET) $(CFLAGS) $(OBJS) $(LDFLAGS) $(DEBUGFLAGS) -o $@
 
 %.o: %.asm
 	@echo '===> ASM $<'
 	$(Q)$(ASM) $(ASMFLAGS) $(DEBUGFLAGS) -M -o $@ $< > $(@:.o=.d) || rm -f $(@:.o=.d)
 	$(Q)$(ASM) $(ASMFLAGS) $(DEBUGFLAGS) -o $@ $<
 
-$(filter %.o, $(SRCS:.c=.o) $(SRCS:.cpp=.o)): $(HDRS)
+$(filter %.o, $(SRCS:.c=.o)): $(HDRS)
 
 %.o: %.c
 	@echo '===> CC $<'
 	$(Q)$(CC_TARGET) $(CFLAGS) $(DEBUGFLAGS) -c $(DEPFLAGS_C) -o $@ $<
-
-%.o: %.cpp
-	@echo '===> CXX $<'
-	$(Q)$(CXX_TARGET) $(CXXFLAGS) $(DEBUGFLAGS) -c $(DEPFLAGS_CXX) -o $@ $<
 
 %.o: %.rc
 	@echo '===> RES $<'
@@ -644,23 +613,18 @@ endif
 info:
 	@echo "ARCH          = $(ARCH)"
 	@echo "WITH_DEBUGGER = $(WITH_DEBUGGER)"
-	@echo "WITH_JMA      = $(WITH_JMA)"
 	@echo "WITH_OPENGL   = $(WITH_OPENGL)"
 	@echo "WITH_PNG      = $(WITH_PNG)"
 	@echo "WITH_SDL      = $(WITH_SDL)"
 	@echo "WITH_PIPEWIRE = $(WITH_PIPEWIRE)"
 	@echo "WITH_AO       = $(WITH_AO)"
 	@echo "SDL3_AVAILABLE = $(SDL3_AVAILABLE)"
-	@echo "SDL2_AVAILABLE = $(SDL2_AVAILABLE)"
 	@echo "PIPEWIRE_AVAILABLE = $(PIPEWIRE_AVAILABLE)"
 	@echo "AO_AVAILABLE  = $(AO_AVAILABLE)"
 	@echo "BINARY        = $(BINARY)"
 	@echo "ASM           = $(ASM)"
 	@echo "CC            = $(CC)"
-	@echo "CXX           = $(CXX)"
-	@echo "CXX_HOST      = $(CXX_HOST)"
 	@echo "CC_TARGET     = $(CC_TARGET)"
-	@echo "CXX_TARGET    = $(CXX_TARGET)"
 	@echo "PSR           = $(PSR)"
 	@echo "WINDRES       = $(WINDRES)"
 	@echo "PNG_CONFIG    = $(PNG_CONFIG)"
@@ -671,8 +635,6 @@ info:
 	@echo "CFLAGS_SDL    = $(CFLAGS_SDL)"
 	@echo "LDFLAGS_SDL   = $(LDFLAGS_SDL)"
 	@echo "CFLAGS        = $(CFLAGS)"
-	@echo "CCFLAGS       = $(CCFLAGS)"
-	@echo "CXXFLAGS      = $(CXXFLAGS)"
 	@echo "LDFLAGS       = $(LDFLAGS)"
 
 fmt:
@@ -689,3 +651,28 @@ install:
 	install -Dm755 linux/zsnes.desktop '$(DESTDIR)$(PREFIX)/share/applications/io.github.xyproto.zsnes.desktop'
 	install -Dm755 linux/io.github.xyproto.zsnes.metainfo.xml -t '$(DESTDIR)$(PREFIX)/share/metainfo'
 	install -Dm644 man/zsnes.1 '$(DESTDIR)$(PREFIX)/share/man/man1/zsnes.1'
+
+# Detect likely-unused C/ASM code via -Wunused* + linker --gc-sections reports.
+# The build already uses -ffunction-sections/-fdata-sections, so each dropped
+# section maps to a function or datum with no reachable references.
+UNUSED_LOG ?= unused-report.txt
+UNUSED_CFLAGS  := -Wunused -Wunused-function -Wunused-variable \
+                  -Wunused-but-set-variable -Wunused-label -Wunused-value \
+                  -Wunused-parameter
+UNUSED_LDFLAGS := -Wl,--print-gc-sections
+unused:
+	@echo '===> UNUSED: clean rebuild with -Wunused* and --print-gc-sections'
+	$(Q)$(MAKE) --no-print-directory clean >/dev/null
+	$(Q)$(MAKE) --no-print-directory \
+	    WARN_FLAGS='$(UNUSED_CFLAGS)' \
+	    EXTRA_LDFLAGS='$(UNUSED_LDFLAGS)' 2>&1 | tee $(UNUSED_LOG)
+	@echo
+	@echo '===> UNUSED: summary (full log in $(UNUSED_LOG))'
+	@echo '--- C -Wunused warnings ---'
+	@grep -E 'warning:.*\[-Wunused' $(UNUSED_LOG) | sort -u || true
+	@echo
+	@echo '--- Linker discarded sections (likely-unused functions/data) ---'
+	@grep -E 'removing unused section' $(UNUSED_LOG) | sort -u || true
+	@echo
+	@echo 'Tip: function "foo" in a discarded ".text.foo" section has no callers'
+	@echo '     reachable from main(); review before deleting (callbacks, asm refs).'

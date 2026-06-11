@@ -32,7 +32,12 @@
 #include "../gblvars.h"
 #include "../input.h"
 #include "../link.h"
-#include "../macros.h"
+#ifndef lengthof
+#define lengthof(x) (sizeof(x) / sizeof *(x))
+#endif
+#ifndef endof
+#define endof(x) ((x) + lengthof(x))
+#endif
 #include "../ui.h"
 #include "../vcache.h"
 #include "../video/procvid.h"
@@ -857,6 +862,7 @@ static void DisplayGUIInputClick_skipscrol(s4 const eax, s4 const edx)
     }
 
     GUIClickCButton(eax, edx, 5, 160, &GameSpecificInput);
+    GUIClickCButton(eax, edx, 105, 160, &SNESRumble);
     GUIClickCButton(eax, edx, 5, 170, &AllowUDLR);
     GUIClickCButton(eax, edx, 105, 170, &Turbo30hz);
     GUIClickCButtonM(eax, edx, 5, 180, &pl12s34);
@@ -1283,9 +1289,9 @@ static void DisplayGUISoundClick(void)
         GUIHoldYlim = GUIwinposy[6] + 131;
         u4 const vol = MusicRelVol * 128 / 100;
         MusicVol = vol < 127 ? vol : 127;
-        asm volatile("call %P0" ::"X"(WDSPReg0C), "a"(DSPMem[0x0C])
+        __asm__ volatile("call %P0" ::"X"(WDSPReg0C), "a"(DSPMem[0x0C])
             : "cc", "memory");
-        asm volatile("call %P0" ::"X"(WDSPReg1C), "a"(DSPMem[0x1C])
+        __asm__ volatile("call %P0" ::"X"(WDSPReg1C), "a"(DSPMem[0x1C])
             : "cc", "memory");
 
         s4 const eax = GUIwinposx[6] + 15;

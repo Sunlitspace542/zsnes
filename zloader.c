@@ -73,23 +73,18 @@ extern uint8_t MovieForcedLengthEnabled;
 extern char* STCart2;
 extern uint32_t MovieForcedLength;
 void zstart();
-void zexit_error();
 
 #ifdef __WIN32__
 void InitDebugger();
 #endif
 
-#define put_line(x) \
-    puts(x);        \
-    lines_out++;
+#define put_line(x) puts(x)
 
 char* ZVERSION = ZVER;
 const unsigned int versionNumber = 0x00000098; // 1.52
 
 static void display_start_message()
 {
-    size_t lines_out = 0;
-    bool tty = isatty(fileno(stdout));
 }
 
 static void display_version()
@@ -100,8 +95,6 @@ static void display_version()
 
 static void display_help()
 {
-    size_t lines_out = 0;
-    bool tty = isatty(fileno(stdout));
 #ifdef __UNIXSDL__
 #ifdef __LIBAO__
     int driver_count;
@@ -123,11 +116,22 @@ static void display_help()
 #endif
 #ifdef __UNIXSDL__
     put_line("  -ad <>  Select Audio Driver :");
-    snprintf(line, sizeof(line), "%22s = Automatically select output", "auto");
+    snprintf(line, sizeof(line), "%22s = Auto-detect best backend (recommended)", "auto");
     put_line(line);
     snprintf(line, sizeof(line), "%22s = Disable audio output backend", "none");
     put_line(line);
+#ifdef __PIPEWIRE__
+    snprintf(line, sizeof(line), "%22s = Native PipeWire output (smooth, low-latency)", "pipewire");
+    put_line(line);
+#endif
 #ifdef __LIBAO__
+    snprintf(line, sizeof(line), "%22s = libao output (auto-tries pulse, alsa, sndio, oss, ...)", "ao");
+    put_line(line);
+#endif
+    snprintf(line, sizeof(line), "%22s = Simple DirectMedia Layer output", "sdl");
+    put_line(line);
+#ifdef __LIBAO__
+    put_line("  -ad ao:<name>  Pick a specific libao plugin (e.g. ao:alsa, ao:oss, ao:sndio):");
     driver_info = ao_driver_info_list(&driver_count);
     while (driver_count--) {
         if (driver_info[driver_count]->type == AO_TYPE_LIVE) {
@@ -135,12 +139,6 @@ static void display_help()
             put_line(line);
         }
     }
-#endif
-    snprintf(line, sizeof(line), "%22s = Simple DirectMedia Layer output", "sdl");
-    put_line(line);
-#ifdef __PIPEWIRE__
-    snprintf(line, sizeof(line), "%22s = Native PipeWire output", "pipewire");
-    put_line(line);
 #endif
 #endif
 #ifndef NO_DEBUGGER
@@ -235,7 +233,7 @@ static void display_help()
     put_line("");
     put_line("  File Formats Supported by GUI : SMC,SFC,SWC,FIG,MGD,MGH,UFO,BIN,");
     put_line("                                  GD3,GD7,USA,EUR,JAP,AUS,ST,BS,");
-    put_line("                                  DX2,048,058,078,1,A,GZ,ZIP,JMA");
+    put_line("                                  DX2,048,058,078,1,A,GZ,ZIP");
     put_line("");
 #ifndef __UNIXSDL__
     put_line("  Microsoft-style options (/option) are also accepted");
@@ -395,8 +393,6 @@ void ConvertJoyMap2()
 
 struct backup_cmdline_vars saved_cmdline_vars;
 
-#define BACKUP_HELP_DOS(func)
-
 #ifdef __WIN32__
 #define BACKUP_HELP_WIN(func) \
     func(KitchenSync);        \
@@ -417,13 +413,12 @@ struct backup_cmdline_vars saved_cmdline_vars;
 #define BACKUP_HELP_SDL(func)
 #endif
 
-#define BACKUP_HELP(func)                 \
-    func(guioff)                          \
-        func(per2exec)                    \
-            func(HacksDisable)            \
-                BACKUP_HELP_DOS(func)     \
-                    BACKUP_HELP_WIN(func) \
-                        BACKUP_HELP_SDL(func)
+#define BACKUP_HELP(func)             \
+    func(guioff)                      \
+        func(per2exec)                \
+            func(HacksDisable)        \
+                BACKUP_HELP_WIN(func) \
+                    BACKUP_HELP_SDL(func)
 
 #define BACKUP_VAR(var) saved_cmdline_vars._##var = var;
 static void backup_all_vars() {
@@ -505,6 +500,14 @@ static void handle_params(int argc, char* argv[])
 
       }
       */
+
+    /* The audio-driver choice is meant to be ephemeral, but cfg.psr persists
+     * libAoDriver across runs. Discard any saved value so a stale "-ad ao:alsa"
+     * from a previous session can't override today's default ("auto"). The
+     * command-line scan below restores any explicitly requested -ad value. */
+#if defined(__UNIXSDL__)
+    strcpy(libAoDriver, "auto");
+#endif
 
     for (i = 1; i < argc; i++) {
 #ifndef __UNIXSDL__
@@ -709,6 +712,25 @@ static void handle_params(int argc, char* argv[])
                         continue;
                     }
 
+                    /* "ao" -> libao with default plugin; "ao:NAME" -> libao with NAME */
+                    if (!strcmp(argv[i], "ao") || !strncmp(argv[i], "ao:", 3)) {
+#ifdef __LIBAO__
+                        if (argv[i][2] == ':' && ao_driver_id(argv[i] + 3) < 0) {
+                            printf("Audio driver \"%s\" not available in libao.\n", argv[i] + 3);
+                            zexit_error();
+                        }
+                        if (strlen(argv[i]) >= sizeof(libAoDriver)) {
+                            printf("Audio driver name too long: %s\n", argv[i]);
+                            zexit_error();
+                        }
+                        strcpy(libAoDriver, argv[i]);
+                        continue;
+#else
+                        puts("This build has no libao support.");
+                        zexit_error();
+#endif
+                    }
+
 #ifdef __LIBAO__
                     if (!strcmp(argv[i], "auto") || !strcmp(argv[i], "none") || !strcmp(argv[i], "sdl")
 #ifdef __PIPEWIRE__
@@ -723,6 +745,10 @@ static void handle_params(int argc, char* argv[])
                     )
 #endif
                     {
+                        if (strlen(argv[i]) >= sizeof(libAoDriver)) {
+                            printf("Audio driver name too long: %s\n", argv[i]);
+                            zexit_error();
+                        }
                         strcpy(libAoDriver, argv[i]);
                     } else {
                         puts("Audio driver selection invalid.");

@@ -22,7 +22,6 @@
 #include "initc.h"
 #include "input.h"
 #include "link.h"
-#include "macros.h"
 #include "ui.h"
 #include "video/c_mode716.h"
 #include "video/procvid.h"
@@ -46,6 +45,8 @@ u4 JoyENow;
 u4 JoyEOrig;
 u4 numspcvblleft;
 u4 spc700idle;
+u2 RumbleData;
+u1 RumbleTimer = 0;
 
 static u1 ComboProg[5];
 static u1 ComboPtr[5];
@@ -489,7 +490,7 @@ void ReadInputDevice(void)
 }
 
 // Terminate Program
-void DosExit(void)
+_Noreturn void DosExit(void)
 {
     if (AutoState == 1)
         SaveSecondState();

@@ -75,7 +75,6 @@ void KeepTVRatio();
 void CheckAlwaysOnTop(void);
 void CheckPriority(void);
 void CheckScreenSaver(void);
-void DisplayWIPDisclaimer(void);
 void DoSleep(void);
 void MinimizeWindow(void);
 void PasteClipBoard(void);
@@ -93,12 +92,12 @@ extern BOOL ctrlptr;
 extern char* CBBuffer;
 extern u4 CBLength;
 
+BOOL ReInitSound(void);
+void ReleaseDirectDraw(void);
+void DDDrawScreen(void);
+
 #ifdef __cplusplus
 }
-
-BOOL ReInitSound();
-void ReleaseDirectDraw();
-void DDDrawScreen();
 #endif
 
 #endif
